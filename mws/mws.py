@@ -255,6 +255,28 @@ class MWS(object):
                 params['%s%d' % (param, (num + 1))] = value
         return params
 
+    def enumerate_param_obj(self, param, items):
+        """
+            Builds a dictionary of an enumerated parameter.
+            Takes any iterable and returns a dictionary.
+            ie.
+            enumerate_param('MarketplaceIdList.Id', (123, 345, 4343))
+            returns
+            {
+                MarketplaceIdList.Id.1: 123,
+                MarketplaceIdList.Id.2: 345,
+                MarketplaceIdList.Id.3: 4343
+            }
+        """
+        params = {}
+        if values is not None:
+            if not param.endswith('.'):
+                param = "%s." % param
+            for item in enumerate(items):
+                for key, value in item.items():
+                    params['%s%d.%s' % (param, (num + 1), key)] = value
+        return params
+
 
 class Feeds(MWS):
     """ Amazon MWS Feeds API """
@@ -550,6 +572,12 @@ class Products(MWS):
                     MarketplaceId=marketplaceid,
                     ItemCondition=condition)
         data.update(self.enumerate_param('ASINList.ASIN.', asins))
+        return self.make_request(data)
+
+    def get_my_fees_estimate(self, marketplaceid, product_items):
+        data = dict(Action='GetMyFeesEstimate',
+                    MarketplaceId=marketplaceid)
+        data.update(self.enumerate_param_obj('FeesEstimateRequestList.FeesEstimateRequest.', product_items))
         return self.make_request(data)
 
 
