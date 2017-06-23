@@ -9,8 +9,8 @@ import urllib
 import hashlib
 import hmac
 import base64
-import utils
 import re
+import traceback
 try:
     from xml.etree.ElementTree import ParseError as XMLError
 except ImportError:
@@ -19,6 +19,112 @@ from time import strftime, gmtime
 
 from requests import request
 from requests.exceptions import HTTPError
+
+
+#Utils
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun 26 15:42:07 2012
+
+Borrowed from https://github.com/timotheus/ebaysdk-python
+
+@author: pierre
+"""
+
+import xml.etree.ElementTree as ET
+import re
+
+
+class object_dict(dict):
+    """object view of dict, you can
+    >>> a = object_dict()
+    >>> a.fish = 'fish'
+    >>> a['fish']
+    'fish'
+    >>> a['water'] = 'water'
+    >>> a.water
+    'water'
+    >>> a.test = {'value': 1}
+    >>> a.test2 = object_dict({'name': 'test2', 'value': 2})
+    >>> a.test, a.test2.name, a.test2.value
+    (1, 'test2', 2)
+    """
+    def __init__(self, initd=None):
+        if initd is None:
+            initd = {}
+        dict.__init__(self, initd)
+
+    def __getattr__(self, item):
+
+        d = self.__getitem__(item)
+
+        if isinstance(d, dict) and 'value' in d and len(d) == 1:
+            return d['value']
+        else:
+            return d
+
+    # if value is the only key in object, you can omit it
+    def __setstate__(self, item):
+        return False
+
+    def __setattr__(self, item, value):
+        self.__setitem__(item, value)
+
+    def getvalue(self, item, value=None):
+        return self.get(item, {}).get('value', value)
+
+
+class xml2dict(object):
+
+    def __init__(self):
+        pass
+
+    def _parse_node(self, node):
+        node_tree = object_dict()
+        # Save attrs and text, hope there will not be a child with same name
+        if node.text:
+            node_tree.value = node.text
+        for (k, v) in node.attrib.items():
+            k, v = self._namespace_split(k, object_dict({'value':v}))
+            node_tree[k] = v
+        #Save childrens
+        for child in node.getchildren():
+            tag, tree = self._namespace_split(child.tag,
+                                              self._parse_node(child))
+            if tag not in node_tree:  # the first time, so store it in dict
+                node_tree[tag] = tree
+                continue
+            old = node_tree[tag]
+            if not isinstance(old, list):
+                node_tree.pop(tag)
+                node_tree[tag] = [old]  # multi times, so change old dict to a list
+            node_tree[tag].append(tree)  # add the new one
+
+        return node_tree
+
+    def _namespace_split(self, tag, value):
+        """
+        Split the tag '{http://cs.sfsu.edu/csc867/myscheduler}patients'
+        ns = http://cs.sfsu.edu/csc867/myscheduler
+        name = patients
+        """
+        result = re.compile("\{(.*)\}(.*)").search(tag)
+        if result:
+            value.namespace, tag = result.groups()
+
+        return (tag, value)
+
+    def parse(self, file):
+        """parse a xml file to a dict"""
+        f = open(file, 'r')
+        return self.fromstring(f.read())
+
+    def fromstring(self, s):
+        """parse a string"""
+        t = ET.fromstring(s)
+        root_tag, root_tree = self._namespace_split(t.tag, self._parse_node(t))
+        return object_dict({root_tag: root_tree})
+
 
 
 __all__ = [
@@ -78,17 +184,12 @@ def remove_empty(d):
     return d
 
 
-def remove_namespace(xml):
-    regex = re.compile(' xmlns(:ns2)?="[^"]+"|(ns2:)|(xml:)')
-    return regex.sub('', xml)
-
-
 class DictWrapper(object):
     def __init__(self, xml, rootkey=None):
-        self.original = xml
+        self._original = xml
         self._rootkey = rootkey
-        self._mydict = utils.xml2dict().fromstring(remove_namespace(xml))
-        self._response_dict = self._mydict.get(self._mydict.keys()[0],
+        self._mydict = xml2dict().fromstring(xml)
+        self._response_dict = self._mydict.get(list(self._mydict.keys())[0],
                                                self._mydict)
 
     @property
@@ -97,6 +198,10 @@ class DictWrapper(object):
             return self._response_dict.get(self._rootkey)
         else:
             return self._response_dict
+
+    @property
+    def original(self):
+        return self._original
 
 
 class DataWrapper(object):
@@ -180,9 +285,10 @@ class MWS(object):
         if self.auth_token:
             params['MWSAuthToken'] = self.auth_token
         params.update(extra_data)
-        request_description = '&'.join(['%s=%s' % (k, urllib.quote(params[k], safe='-_.~').encode('utf-8')) for k in sorted(params)])
+        request_description = '&'.join(['%s=%s' % (k, urllib.parse.quote_plus(params[k], safe='-_.~')) for k in sorted(params)])
+
         signature = self.calc_signature(method, request_description)
-        url = '%s%s?%s&Signature=%s' % (self.domain, self.uri, request_description, urllib.quote(signature))
+        url = '%s%s?%s&Signature=%s' % (self.domain, self.uri, request_description, urllib.parse.quote_plus(signature))
         headers = {'User-Agent': 'python-amazon-mws/0.0.1 (Language=Python)'}
         headers.update(kwargs.get('extra_headers', {}))
 
@@ -202,10 +308,11 @@ class MWS(object):
             # Amazon's MWS API returns XML error responses with "text/plain" as the Content-Type.
             try:
                 parsed_response = DictWrapper(data, extra_data.get("Action") + "Result")
-            except XMLError:
+            except XMLError as e:
+                traceback.print_exc()
                 parsed_response = DataWrapper(data, response.headers)
 
-        except HTTPError, e:
+        except HTTPError as e:
             error = MWSError(str(e.response.text))
             error.response = e.response
             raise error
@@ -226,7 +333,7 @@ class MWS(object):
         """Calculate MWS signature to interface with Amazon
         """
         sig_data = method + '\n' + self.domain.replace('https://', '').lower() + '\n' + self.uri + '\n' + request_description
-        return base64.b64encode(hmac.new(str(self.secret_key), sig_data, hashlib.sha256).digest())
+        return base64.b64encode(hmac.new(self.secret_key.encode('utf-8'), sig_data.encode('utf-8'), hashlib.sha256).digest())
 
     def get_timestamp(self):
         """
@@ -260,19 +367,34 @@ class MWS(object):
             Builds a dictionary of an enumerated parameter.
             Takes any iterable and returns a dictionary.
             ie.
-            enumerate_param('MarketplaceIdList.Id', (123, 345, 4343))
+            enumerate_param('FeesEstimateRequestList.FeesEstimateRequest.', \
+                [{'MarketplaceId': 'ATVPDKIKX0DER', 'IdType': 'ASIN', 'IdValue': 'B002KT3XQM' \
+                'IsAmazonFulfilled': True, 'Identifier': 'randomstring', \
+                'PriceToEstimateFees.ListingPrice.CurrencyCode': 'USD', \
+                'PriceToEstimateFees.ListingPrice.Amount': '30.00', \
+                'PriceToEstimateFees.Shipping.CurrencyCode': 'USD', \
+                'PriceToEstimateFees.Shipping.Amount': '3.99', \
+                'PriceToEstimateFees.Points.PointsNumber': '0'}])
+
             returns
             {
-                MarketplaceIdList.Id.1: 123,
-                MarketplaceIdList.Id.2: 345,
-                MarketplaceIdList.Id.3: 4343
+                FeesEstimateRequestList.FeesEstimateRequest.1.MarketplaceId: 'ATVPDKIKX0DER',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IdType: 'ASIN',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IdValue: 'B002KT3XQM',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IsAmazonFulfilled: True,
+                FeesEstimateRequestList.FeesEstimateRequest.1.Identifier: 'randomstring',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.ListingPrice.CurrencyCode: 'USD',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.ListingPrice.Amount: '30.00',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Shipping.CurrencyCode: 'USD',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Shipping.Amount: '3.99',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Points.PointsNumber: '0'
             }
         """
         params = {}
-        if values is not None:
+        if items is not None:
             if not param.endswith('.'):
                 param = "%s." % param
-            for item in enumerate(items):
+            for num, item in enumerate(items):
                 for key, value in item.items():
                     params['%s%d.%s' % (param, (num + 1), key)] = value
         return params
@@ -574,9 +696,8 @@ class Products(MWS):
         data.update(self.enumerate_param('ASINList.ASIN.', asins))
         return self.make_request(data)
 
-    def get_my_fees_estimate(self, marketplaceid, product_items):
-        data = dict(Action='GetMyFeesEstimate',
-                    MarketplaceId=marketplaceid)
+    def get_my_fees_estimate(self, product_items):
+        data = dict(Action='GetMyFeesEstimate')
         data.update(self.enumerate_param_obj('FeesEstimateRequestList.FeesEstimateRequest.', product_items))
         return self.make_request(data)
 
