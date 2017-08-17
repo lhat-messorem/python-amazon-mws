@@ -152,7 +152,7 @@ MARKETPLACES = {
     "UK" : "https://mws-eu.amazonservices.com", #A1F83G8C2ARO7P
     "JP" : "https://mws.amazonservices.jp", #A1VC38T7YXB528
     "CN" : "https://mws.amazonservices.com.cn", #AAHKV2X7AFYLW
-    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8    
+    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8
 }
 
 
@@ -303,6 +303,8 @@ class MWS(object):
             # be aware that response.content returns the content in bytes while response.text calls
             # response.content and converts it to unicode.
             data = response.content
+            request_header = response.headers
+            print("HEADER FROM MWS {}".format(request_header))
 
             # I do not check the headers to decide which content structure to server simply because sometimes
             # Amazon's MWS API returns XML error responses with "text/plain" as the Content-Type.
