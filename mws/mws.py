@@ -46,7 +46,7 @@ MARKETPLACES = {
     "UK" : "https://mws-eu.amazonservices.com", #A1F83G8C2ARO7P
     "JP" : "https://mws.amazonservices.jp", #A1VC38T7YXB528
     "CN" : "https://mws.amazonservices.com.cn", #AAHKV2X7AFYLW
-    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8    
+    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8
 }
 
 
@@ -260,19 +260,34 @@ class MWS(object):
             Builds a dictionary of an enumerated parameter.
             Takes any iterable and returns a dictionary.
             ie.
-            enumerate_param('MarketplaceIdList.Id', (123, 345, 4343))
+            enumerate_param('FeesEstimateRequestList.FeesEstimateRequest.', \
+                [{'MarketplaceId': 'ATVPDKIKX0DER', 'IdType': 'ASIN', 'IdValue': 'B002KT3XQM' \
+                'IsAmazonFulfilled': True, 'Identifier': 'randomstring', \
+                'PriceToEstimateFees.ListingPrice.CurrencyCode': 'USD', \
+                'PriceToEstimateFees.ListingPrice.Amount': '30.00', \
+                'PriceToEstimateFees.Shipping.CurrencyCode': 'USD', \
+                'PriceToEstimateFees.Shipping.Amount': '3.99', \
+                'PriceToEstimateFees.Points.PointsNumber': '0'}])
+
             returns
             {
-                MarketplaceIdList.Id.1: 123,
-                MarketplaceIdList.Id.2: 345,
-                MarketplaceIdList.Id.3: 4343
+                FeesEstimateRequestList.FeesEstimateRequest.1.MarketplaceId: 'ATVPDKIKX0DER',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IdType: 'ASIN',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IdValue: 'B002KT3XQM',
+                FeesEstimateRequestList.FeesEstimateRequest.1.IsAmazonFulfilled: True,
+                FeesEstimateRequestList.FeesEstimateRequest.1.Identifier: 'randomstring',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.ListingPrice.CurrencyCode: 'USD',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.ListingPrice.Amount: '30.00',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Shipping.CurrencyCode: 'USD',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Shipping.Amount: '3.99',
+                FeesEstimateRequestList.FeesEstimateRequest.1.PriceToEstimateFees.Points.PointsNumber: '0'
             }
         """
         params = {}
-        if values is not None:
+        if items is not None:
             if not param.endswith('.'):
                 param = "%s." % param
-            for item in enumerate(items):
+            for num, item in enumerate(items):
                 for key, value in item.items():
                     params['%s%d.%s' % (param, (num + 1), key)] = value
         return params
@@ -574,9 +589,8 @@ class Products(MWS):
         data.update(self.enumerate_param('ASINList.ASIN.', asins))
         return self.make_request(data)
 
-    def get_my_fees_estimate(self, marketplaceid, product_items):
-        data = dict(Action='GetMyFeesEstimate',
-                    MarketplaceId=marketplaceid)
+    def get_my_fees_estimate(self, product_items):
+        data = dict(Action='GetMyFeesEstimate')
         data.update(self.enumerate_param_obj('FeesEstimateRequestList.FeesEstimateRequest.', product_items))
         return self.make_request(data)
 
